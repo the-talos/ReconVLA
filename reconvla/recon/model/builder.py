@@ -7,13 +7,17 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig, BitsAn
 import torch
 from recon.model import *
 from recon.constants import DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
+from recon.device import default_device_type, resolve_device
 
 
-def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, load_4bit=False, device_map="auto", device="cuda", use_flash_attn=False, **kwargs):
+def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, load_4bit=False, device_map="auto", device=None, use_flash_attn=False, **kwargs):
     kwargs = {"device_map": device_map, **kwargs}
 
+    if device is None:
+        device = default_device_type()
+    on_cuda = torch.device(device).type == "cuda"
     if device != "cuda":
-        kwargs['device_map'] = {"": device}
+        kwargs['device_map'] = {"": str(resolve_device(device))}
 
     if load_8bit:
         kwargs['load_in_8bit'] = True
@@ -28,7 +32,9 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
     elif getattr(kwargs, 'torch_dtype', False):
         kwargs['torch_dtype'] = torch.float16
 
-    if use_flash_attn:
+    if use_flash_attn and not on_cuda:
+        print('[WARNING] flash attention needs CUDA, using the default attention implementation')
+    elif use_flash_attn:
         kwargs['attn_implementation'] = 'flash_attention_2'
 
     print(f'=> loading ReconQwen2ForCausalLM ...')
@@ -52,8 +58,8 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
     vision_tower = model.get_vision_tower()
     if not vision_tower.is_loaded:
         print('[WARNING] CLIP is not loaded!! Loading now ...')
-        vision_tower.load_model(device_map=device_map)
-    if device_map != 'auto':
+        vision_tower.load_model(device_map=device_map if on_cuda else kwargs['device_map'])
+    if on_cuda and device_map != 'auto':
         vision_tower.to(device=device_map, dtype=torch.float16)
     image_processor = vision_tower.image_processor
 

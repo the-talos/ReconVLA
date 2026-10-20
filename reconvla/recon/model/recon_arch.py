@@ -24,7 +24,6 @@ from recon.constants import (
 from safetensors.torch import load_file
 import torch
 import json
-import deepspeed
 from recon.mm_utils import get_anyres_image_grid_shape
 
 import os
@@ -55,6 +54,7 @@ def load_state_dict_into_model(model_to_load=None,
         # state_dict
         if len([key for key in state_dict if key.startswith(prefix)]) > 0:
             if zero_stage == 3:
+                import deepspeed
                 # In sharded models, each shard has only part of the full state_dict, so only gather
                 # parameters that are in the current state_dict.
                 named_parameters = dict(

@@ -42,6 +42,20 @@ pip install -r recon_requirements.txt
 cd reconvla
 ```
 
+### How to run the same on Intel's XPU
+
+The model server (`serve/flask_server.py`) and `load_pretrained_model` pick XPU, then CUDA, then CPU. Skip the CUDA wheels, `flash-attn`, `deepspeed` and `bitsandbytes` from `recon_requirements.txt` and install:
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/xpu
+pip install "transformers==4.43.1" "tokenizers==0.19.1" "numpy<2" accelerate==0.33.0 flask einops sentencepiece diffusers==0.30.0 timm==0.6.13 opencv-python-headless pyyaml
+```
+Start the model server on one card (`ZE_AFFINITY_MASK=0` replaces `CUDA_VISIBLE_DEVICES=0`; `--device xpu:0` is optional and `--dtype bfloat16` loads the weights in bf16):
+```bash
+cd reconvla
+PYTHONPATH=$PWD ZE_AFFINITY_MASK=0 python ./serve/flask_server.py --model-path /path/to/checkpoint --action_stat ./statistics.yaml --port 9097 --dtype bfloat16
+```
+The CALVIN simulator side, flash attention and the reconstruction branch stay CUDA-only or unused. Attention falls back to the default implementation on XPU. Set `mm_vision_tower` in the checkpoint `config.json` to a local SigLIP so400m folder if `./siglip-so400m-patch14-384` does not exist.
+
 
 ## Data Preparation
 This project ships with no raw data.

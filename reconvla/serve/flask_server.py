@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request, Response
 from recon.model.builder import load_pretrained_model
 from recon.utils import disable_torch_init
+from recon.device import is_available
 from recon.mm_utils import (
     tokenizer_image_token,
     process_images,
@@ -40,8 +41,9 @@ class LLMRobotServer:
         model_path = os.path.expanduser(args.model_path)
         model_name = get_model_name_from_path(model_path)
         model_base = args.model_base
+        load_kwargs = {"torch_dtype": getattr(torch, args.dtype)} if args.dtype else {}
         self.tokenizer, self.llm_robot, self.image_processor, self.context_len = (
-            load_pretrained_model(model_path, model_base, model_name)
+            load_pretrained_model(model_path, model_base, model_name, device=args.device, **load_kwargs)
         )
         self.temperature = args.temperature
         self.top_p = args.top_p
@@ -106,8 +108,8 @@ class LLMRobotServer:
         time0 = time.time()
         with torch.inference_mode():
             output_ids = self.llm_robot.generate(
-                input_ids.cuda(),
-                images=images.to(dtype=torch.float16, device="cuda", non_blocking=True),
+                input_ids.to(self.llm_robot.device),
+                images=images.to(dtype=torch.float16, device=self.llm_robot.device, non_blocking=True),
                 do_sample=True if self.temperature > 0 else False,
                 temperature=self.temperature,
                 top_p=self.top_p,
@@ -127,10 +129,7 @@ class LLMRobotServer:
         return np.array(actions)
 
 
-if __name__ == "__main__":
-    inference_times = []
-    torch.cuda.reset_peak_memory_stats()
-    memory_samples = []
+def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model-path",
@@ -150,7 +149,28 @@ if __name__ == "__main__":
     )
     parser.add_argument("--double_instruction", type=bool, default=True)
     parser.add_argument("--port", type=int, default=9057)
-    args = parser.parse_args()
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="torch device, for example xpu:0 or cuda:0 (default: XPU, then CUDA, then CPU)",
+    )
+    parser.add_argument(
+        "--dtype",
+        type=str,
+        default=None,
+        choices=["float32", "float16", "bfloat16"],
+        help="weight dtype (default: the transformers default)",
+    )
+    return parser
+
+
+if __name__ == "__main__":
+    inference_times = []
+    if is_available("cuda"):
+        torch.cuda.reset_peak_memory_stats()
+    memory_samples = []
+    args = build_parser().parse_args()
 
     flask_app = Flask(__name__)
     llm_robot = LLMRobotServer(args)
